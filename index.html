@@ -153,6 +153,89 @@
   .fab {
     position: sticky; bottom: 12px; margin-top: 10px;
   }
+  .part-row {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+  .part-row-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .part-name { font-weight: 600; font-size: 14px; }
+  .part-status {
+    font-size: 11px;
+    padding: 2px 9px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+  .status-good { background: #163a2c; color: #8fe0bb; }
+  .status-warn { background: #4a3a16; color: #f0c674; }
+  .status-overdue { background: #3a1c1c; color: #ff9d9d; }
+  .status-unknown { background: #2a2f3a; color: #9aa3b2; }
+  .status-pending { background: #1c2e4a; color: #9cc2ff; }
+  .pending-row {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .pending-row .part-name { font-size: 14px; }
+  .pending-row .btn {
+    width: auto;
+    padding: 8px 12px;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .ps-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+  .ps-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .ps-detail {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .ps-detail b { color: var(--text); font-weight: 500; }
+  .part-row select, .part-row input {
+    margin-top: 6px;
+    font-size: 13px;
+    padding: 8px 10px;
+  }
+  .part-badge {
+    display: inline-block;
+    background: var(--danger);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 10px;
+    padding: 1px 6px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
 </style>
 </head>
 <body>
@@ -199,9 +282,61 @@
         <label>หมายเหตุ</label>
         <textarea id="f_notes" rows="2" placeholder="(ถ้ามี)"></textarea>
       </div>
+      <div class="field" id="partsFieldWrap" style="display:none">
+        <label>อะไหล่ที่เกี่ยวข้องกับเครื่องนี้ (เลือกเฉพาะตัวที่ตรวจ/เปลี่ยนรอบนี้)</label>
+        <div id="partsList"></div>
+      </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-secondary" id="cancelBtn">ยกเลิก</button>
         <button type="submit" class="btn" id="submitBtn">บันทึก</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-overlay" id="pisOverlay">
+  <div class="modal">
+    <h2>เริ่มใช้งาน Part</h2>
+    <div class="subtitle" id="pisTarget" style="margin-bottom:14px"></div>
+    <form id="pisForm">
+      <div class="field">
+        <label>วันที่เริ่มใช้งาน</label>
+        <input type="text" id="pis_date" placeholder="เช่น 29/9/2026" required>
+      </div>
+      <div class="field">
+        <label>ประเภทงาน</label>
+        <select id="pis_type">
+          <option>Switching</option>
+          <option>Routine Maintenance</option>
+          <option>Repair</option>
+          <option>Upgrade/Replacement</option>
+          <option>Inspection</option>
+          <option>Finding</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>รายละเอียดงาน</label>
+        <textarea id="pis_desc" rows="3" placeholder="เช่น สลับใช้งาน PU792B แทน PU792A" required></textarea>
+      </div>
+      <div class="field">
+        <label>ผู้รับเหมา / หน่วยงาน</label>
+        <input type="text" id="pis_provider" placeholder="เช่น Internal Team, ชื่อบริษัท">
+      </div>
+      <div class="field">
+        <label>Internal / External</label>
+        <select id="pis_performed">
+          <option>Internal</option>
+          <option>External</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>หมายเหตุ</label>
+        <textarea id="pis_notes" rows="2" placeholder="(ถ้ามี)"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="pisCancelBtn">ยกเลิก</button>
+        <button type="submit" class="btn" id="pisSubmitBtn">บันทึก</button>
       </div>
     </form>
   </div>
@@ -213,9 +348,13 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbybNruqSLPqkIhI
 
 const MACHINES_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Machines&range=A5:F212`;
 const LOGS_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=All_Data&range=A2:M2000`;
+const BOM_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('BOM')}&range=A3:E2000`;
+const PART_STATUS_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('Part Status')}&range=A3:E2000`;
 
 let MACHINES = [];
 let LOGS = [];
+let BOM = [];
+let PART_STATUS = {}; // key: machineName + '|' + partId -> {lastReplaced, lastInspected}
 let currentMachineId = null;
 
 function slugify(name) {
@@ -260,9 +399,11 @@ async function fetchCSV(url) {
 }
 
 async function loadData() {
-  const [machineRows, logRows] = await Promise.all([
+  const [machineRows, logRows, bomRows, statusRows] = await Promise.all([
     fetchCSV(MACHINES_URL),
-    fetchCSV(LOGS_URL)
+    fetchCSV(LOGS_URL),
+    fetchCSV(BOM_URL).catch(() => []),
+    fetchCSV(PART_STATUS_URL).catch(() => [])
   ]);
 
   const seen = {};
@@ -311,6 +452,54 @@ async function loadData() {
         notes: (r[8] || '').trim(),
       };
     });
+
+  BOM = bomRows
+    .filter(r => r[0] && r[1] && String(r[0]).trim() && String(r[1]).trim())
+    .map(r => ({
+      machineName: String(r[0]).trim(),
+      partId: String(r[1]).trim(),
+      partName: (r[2] || '').trim() || r[1].trim(),
+      qty: (r[3] || '').toString().trim(),
+      intervalDays: parseInt(r[4], 10) || 0,
+    }));
+
+  PART_STATUS = {};
+  statusRows
+    .filter(r => r[0] && r[1] && String(r[0]).trim() && String(r[1]).trim())
+    .forEach(r => {
+      const key = String(r[0]).trim() + '|' + String(r[1]).trim();
+      PART_STATUS[key] = {
+        lastReplaced: (r[2] || '').trim(),
+        lastInspected: (r[3] || '').trim(),
+        inService: (r[4] || '').trim(),
+      };
+    });
+}
+
+function computePartStatus(partId, machineName, intervalDays) {
+  const key = machineName + '|' + partId;
+  const st = PART_STATUS[key];
+  const lastReplaced = st ? st.lastReplaced : '';
+  const base = { lastReplaced: lastReplaced || '', inService: (st && st.inService) || '', daysSince: null };
+
+  if (!lastReplaced) return Object.assign(base, { label: 'ยังไม่มีประวัติเปลี่ยน', cls: 'status-unknown', overdue: false, pending: false });
+  const lastTime = parseDate(lastReplaced);
+  if (!lastTime) return Object.assign(base, { label: 'ยังไม่มีประวัติเปลี่ยน', cls: 'status-unknown', overdue: false, pending: false });
+
+  const inService = st.inService || '';
+  const inServiceTime = parseDate(inService);
+  if (!inServiceTime) {
+    // Replaced but not yet put into service — the aging clock hasn't started.
+    return Object.assign(base, { label: 'ติดตั้งแล้ว รอใช้งาน', cls: 'status-pending', overdue: false, pending: true });
+  }
+
+  const daysSince = Math.floor((Date.now() - inServiceTime) / 86400000);
+  base.daysSince = daysSince;
+  if (!intervalDays) return Object.assign(base, { label: `ใช้งานมาแล้ว ${daysSince} วัน`, cls: 'status-good', overdue: false, pending: false });
+  const ratio = daysSince / intervalDays;
+  if (ratio >= 1) return Object.assign(base, { label: `เกินกำหนด (${daysSince}/${intervalDays} วัน)`, cls: 'status-overdue', overdue: true, pending: false });
+  if (ratio >= 0.8) return Object.assign(base, { label: `ใกล้ครบรอบ (${daysSince}/${intervalDays} วัน)`, cls: 'status-warn', overdue: false, pending: false });
+  return Object.assign(base, { label: `ปกติ (${daysSince}/${intervalDays} วัน)`, cls: 'status-good', overdue: false, pending: false });
 }
 
 function getParam() {
@@ -340,7 +529,7 @@ function renderDirectory(filterText) {
   app.innerHTML = `
     <h1>Maintenance &amp; Repair Log</h1>
     <div class="subtitle">บันทึกซ่อมบำรุงเครื่องจักร (SD Guthrie)</div>
-    <div class="banner live">🟢 ข้อมูลอัปเดตแบบเรียลไทม์</div>
+    <div class="banner live">🔴 ข้อมูลอัปเดตแบบเรียลไทม์</div>
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="ค้นหาเครื่องจักร / Equipment ID / Location..." value="${escapeHtml(filterText || '')}">
     </div>
@@ -373,6 +562,7 @@ function renderDirectory(filterText) {
 function renderMachine(id) {
   const app = document.getElementById('app');
   const machine = MACHINES.find(m => m.id === id);
+  currentMachineId = id;
 
   if (!machine) {
     app.innerHTML = `
@@ -388,6 +578,11 @@ function renderMachine(id) {
     return (db || 0) - (da || 0);
   });
 
+  const machineParts = BOM.filter(b => b.machineName === machine.name);
+  const partsWithStatus = machineParts.map(p => ({ p, st: computePartStatus(p.partId, machine.name, p.intervalDays) }));
+  const overdueParts = partsWithStatus.filter(x => x.st.overdue);
+  const pendingParts = partsWithStatus.filter(x => x.st.pending);
+
   app.innerHTML = `
     <a class="back-link" id="backLink">← กลับหน้ารายการ</a>
     <h1>${escapeHtml(machine.name)}</h1>
@@ -398,6 +593,40 @@ function renderMachine(id) {
       <div class="info-row"><span class="info-label">Location/Department</span><span class="info-value">${escapeHtml(machine.location || '-')}</span></div>
       <div class="info-row"><span class="info-label">Warranty Expiration</span><span class="info-value">${escapeHtml(machine.warranty || '-')}</span></div>
     </div>
+    ${overdueParts.length > 0 ? `
+      <div class="banner" style="background:#3a1c1c;color:#ff9d9d;">
+        ⚠️ มี ${overdueParts.length} part ที่เกินกำหนดเปลี่ยนแล้ว: ${overdueParts.map(x => escapeHtml(x.p.partName)).join(', ')}
+      </div>
+    ` : ''}
+    ${pendingParts.length > 0 ? `
+      <div class="section-title">Part ที่เปลี่ยนไว้แล้ว รอเริ่มใช้งาน</div>
+      <div id="pendingPartsList">
+        ${pendingParts.map(x => `
+          <div class="pending-row" data-part-id="${escapeHtml(x.p.partId)}" data-part-name="${escapeHtml(x.p.partName)}">
+            <span class="part-name">${escapeHtml(x.p.partName)}</span>
+            <button class="btn put-in-service-btn" type="button">เริ่มใช้งาน</button>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+    ${partsWithStatus.length > 0 ? `
+      <div class="section-title">สถานะอะไหล่ (${partsWithStatus.length} รายการ)</div>
+      <div id="partStatusList">
+        ${partsWithStatus.map(x => `
+          <div class="ps-card">
+            <div class="ps-card-head">
+              <span class="part-name">${escapeHtml(x.p.partName)}${x.st.overdue ? '<span class="part-badge">เกินกำหนด</span>' : ''}</span>
+              <span class="part-status ${x.st.cls}">${escapeHtml(x.st.label)}</span>
+            </div>
+            <div class="ps-detail">
+              <span>เปลี่ยนล่าสุด: <b>${escapeHtml(x.st.lastReplaced || '-')}</b></span>
+              <span>เริ่มใช้งาน: <b>${escapeHtml(x.st.inService || (x.st.pending ? 'ยังไม่เริ่ม' : '-'))}</b></span>
+              ${x.st.daysSince !== null ? `<span>ใช้งานมาแล้ว: <b>${x.st.daysSince} วัน</b></span>` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
     <div class="fab"><button class="btn" id="addLogBtn">+ เพิ่ม Log ซ่อมบำรุง</button></div>
     <div class="section-title">ประวัติซ่อมบำรุง (${logs.length} รายการ)</div>
     <div id="logList">
@@ -414,7 +643,76 @@ function renderMachine(id) {
 
   document.getElementById('backLink').addEventListener('click', () => navigate(null));
   document.getElementById('addLogBtn').addEventListener('click', () => openModal(machine));
+  document.querySelectorAll('.put-in-service-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const row = e.target.closest('.pending-row');
+      openPisModal(machine, row.dataset.partId, row.dataset.partName);
+    });
+  });
 }
+
+let pisTarget = null; // { machine, partId, partName }
+
+function openPisModal(machine, partId, partName) {
+  pisTarget = { machine, partId, partName };
+  document.getElementById('pisForm').reset();
+  document.getElementById('pisTarget').textContent = `${machine.name} — ${partName}`;
+  const today = new Date();
+  document.getElementById('pis_date').value = `${today.getDate()}/${today.getMonth()+1}/${today.getFullYear()}`;
+  document.getElementById('pis_desc').value = `เริ่มใช้งาน ${partName}`;
+  document.getElementById('pisOverlay').classList.add('open');
+}
+
+function closePisModal() {
+  document.getElementById('pisOverlay').classList.remove('open');
+  pisTarget = null;
+}
+
+document.getElementById('pisCancelBtn').addEventListener('click', closePisModal);
+document.getElementById('pisOverlay').addEventListener('click', (e) => {
+  if (e.target.id === 'pisOverlay') closePisModal();
+});
+
+document.getElementById('pisForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!pisTarget) return;
+  const { machine, partId, partName } = pisTarget;
+
+  const payload = {
+    requestType: 'putInService',
+    machineName: machine.name,
+    partId,
+    partName,
+    date: document.getElementById('pis_date').value,
+    typeOfService: document.getElementById('pis_type').value,
+    description: document.getElementById('pis_desc').value,
+    serviceProvider: document.getElementById('pis_provider').value,
+    performedBy: document.getElementById('pis_performed').value,
+    notes: document.getElementById('pis_notes').value,
+    location: machine.location,
+  };
+
+  const submitBtn = document.getElementById('pisSubmitBtn');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'กำลังบันทึก...';
+
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(payload)
+    });
+    closePisModal();
+    showToast(`เริ่มนับอายุการใช้งาน: ${partName}`);
+    await loadData();
+    renderMachine(currentMachineId);
+  } catch (err) {
+    showToast('บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง', true);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'บันทึก';
+  }
+});
 
 function parseDate(s) {
   if (!s) return 0;
@@ -428,6 +726,37 @@ function openModal(machine) {
   document.getElementById('logForm').reset();
   const today = new Date();
   document.getElementById('f_date').value = `${today.getDate()}/${today.getMonth()+1}/${today.getFullYear()}`;
+
+  const parts = BOM.filter(b => b.machineName === machine.name);
+  const wrap = document.getElementById('partsFieldWrap');
+  const list = document.getElementById('partsList');
+
+  if (parts.length === 0) {
+    wrap.style.display = 'none';
+    list.innerHTML = '';
+  } else {
+    wrap.style.display = 'block';
+    list.innerHTML = parts.map(p => {
+      const st = computePartStatus(p.partId, machine.name, p.intervalDays);
+      return `
+        <div class="part-row" data-part-id="${escapeHtml(p.partId)}" data-part-name="${escapeHtml(p.partName)}">
+          <div class="part-row-head">
+            <span class="part-name">${escapeHtml(p.partName)}${st.overdue ? '<span class="part-badge">เกินกำหนด</span>' : ''}</span>
+            <span class="part-status ${st.cls}">${escapeHtml(st.label)}</span>
+          </div>
+          <select class="part-action">
+            <option value="none">ไม่ได้ตรวจรอบนี้</option>
+            <option value="inspected">ตรวจแล้ว — สภาพดี (ไม่เปลี่ยน)</option>
+            <option value="replaced">เปลี่ยน (ใช้งานทันที)</option>
+            <option value="replaced-standby">เปลี่ยน-สำรองไว้ (ยังไม่ใช้งาน)</option>
+          </select>
+          <input type="text" class="part-qty" placeholder="จำนวนที่ใช้ (ถ้าเลือกเปลี่ยน)" value="${escapeHtml(p.qty)}">
+          <input type="text" class="part-note" placeholder="หมายเหตุสภาพ (ถ้ามี)">
+        </div>
+      `;
+    }).join('');
+  }
+
   document.getElementById('modalOverlay').classList.add('open');
 }
 
@@ -453,6 +782,23 @@ document.getElementById('logForm').addEventListener('submit', async (e) => {
   const machine = MACHINES.find(m => m.id === currentMachineId);
   if (!machine) return;
 
+  const partActions = [];
+  document.querySelectorAll('#partsList .part-row').forEach(row => {
+    const action = row.querySelector('.part-action').value;
+    if (action === 'none') return;
+    let actionLabel;
+    if (action === 'replaced') actionLabel = 'Replaced';
+    else if (action === 'replaced-standby') actionLabel = 'Replaced - Standby';
+    else actionLabel = 'Inspected - Good Condition';
+    partActions.push({
+      partId: row.dataset.partId,
+      partName: row.dataset.partName,
+      action: actionLabel,
+      qty: row.querySelector('.part-qty').value,
+      notes: row.querySelector('.part-note').value
+    });
+  });
+
   const payload = {
     machineName: machine.name,
     date: document.getElementById('f_date').value,
@@ -462,7 +808,8 @@ document.getElementById('logForm').addEventListener('submit', async (e) => {
     performedBy: document.getElementById('f_performed').value,
     notes: document.getElementById('f_notes').value,
     location: machine.location,
-    cost: ''
+    cost: '',
+    partActions
   };
 
   const submitBtn = document.getElementById('submitBtn');
@@ -476,20 +823,11 @@ document.getElementById('logForm').addEventListener('submit', async (e) => {
       body: JSON.stringify(payload)
     });
     // Apps Script's response may be opaque depending on browser/CORS state;
-    // treat a non-throwing fetch as success.
-    LOGS.unshift({
-      machineId: machine.id,
-      machineName: machine.name,
-      date: payload.date,
-      typeOfService: payload.typeOfService,
-      description: payload.description,
-      serviceProvider: payload.serviceProvider,
-      cost: '',
-      performedBy: payload.performedBy,
-      notes: payload.notes
-    });
+    // treat a non-throwing fetch as success. Reload everything (logs + part
+    // status) from the sheet so part statuses/stock reflect what was just written.
     closeModal();
     showToast('บันทึก Log สำเร็จ');
+    await loadData();
     renderMachine(currentMachineId);
   } catch (err) {
     showToast('บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง', true);
