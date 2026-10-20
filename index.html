@@ -236,6 +236,47 @@
     margin-left: 6px;
     vertical-align: middle;
   }
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+  .filter-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .chip {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 20px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .chip.active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .machine-status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 4px 0 14px;
+  }
+  .machine-status-row .since { font-size: 12px; color: var(--text-dim); }
+  .machine-status-row .btn {
+    width: auto;
+    padding: 6px 12px;
+    font-size: 13px;
+    margin-left: auto;
+  }
 </style>
 </head>
 <body>
@@ -342,6 +383,46 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="msOverlay">
+  <div class="modal">
+    <h2>เปลี่ยนสถานะเครื่องจักร</h2>
+    <div class="subtitle" id="msTarget" style="margin-bottom:14px"></div>
+    <form id="msForm">
+      <div class="field">
+        <label>สถานะใหม่</label>
+        <select id="ms_status">
+          <option value="Running">ใช้งานอยู่</option>
+          <option value="Standby">สำรอง</option>
+          <option value="Under Repair">หยุดซ่อม</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>วันที่</label>
+        <input type="text" id="ms_date" placeholder="เช่น 29/9/2026" required>
+      </div>
+      <div class="field">
+        <label>เหตุผล / รายละเอียด</label>
+        <textarea id="ms_desc" rows="3" placeholder="เช่น สลับใช้งาน PU792B แทน PU792A" required></textarea>
+      </div>
+      <div class="field">
+        <label>ผู้รับเหมา / หน่วยงาน</label>
+        <input type="text" id="ms_provider" placeholder="เช่น Internal Team, ชื่อบริษัท">
+      </div>
+      <div class="field">
+        <label>Internal / External</label>
+        <select id="ms_performed">
+          <option>Internal</option>
+          <option>External</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="msCancelBtn">ยกเลิก</button>
+        <button type="submit" class="btn" id="msSubmitBtn">บันทึก</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 const SHEET_ID = '1ZISQ2C3IenpK7nQ8JJ7f6Jott5cTXA4pDcPmVINt73U';
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbybNruqSLPqkIhIONnsaI6TfivRogBNN5a6w5UpI_mf4TJbopm8-_uQrePTo_ya78PH/exec';
@@ -351,11 +432,43 @@ const LOGS_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx
 const BOM_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('BOM')}&range=A3:E2000`;
 const PART_STATUS_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('Part Status')}&range=A3:E2000`;
 
+const MACHINE_STATUS_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('Machine Status')}&range=A3:D2000`;
+
 let MACHINES = [];
 let LOGS = [];
 let BOM = [];
-let PART_STATUS = {}; // key: machineName + '|' + partId -> {lastReplaced, lastInspected}
+let PART_STATUS = {}; // key: machineName + '|' + partId -> {lastReplaced, lastInspected, inService}
+let MACHINE_STATUS = {}; // key: machineName -> {status, since, note}
+let statusFilter = 'all';
 let currentMachineId = null;
+
+// Machine statuses are stored in the sheet as 'Running' | 'Standby' | 'Under Repair'.
+// Thai spellings typed by hand into the sheet are accepted too.
+const STATUS_INFO = {
+  running: { key: 'Running', label: 'ใช้งานอยู่', cls: 'status-good' },
+  standby: { key: 'Standby', label: 'สำรอง', cls: 'status-warn' },
+  repair:  { key: 'Under Repair', label: 'หยุดซ่อม', cls: 'status-overdue' },
+};
+
+function normalizeStatus(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return '';
+  if (s === 'running' || s === 'ใช้งานอยู่' || s === 'ใช้งาน') return 'running';
+  if (s === 'standby' || s === 'สำรอง') return 'standby';
+  if (s === 'under repair' || s === 'repair' || s === 'หยุดซ่อม' || s === 'ซ่อม') return 'repair';
+  return '';
+}
+
+function getMachineStatus(machineName) {
+  const st = MACHINE_STATUS[machineName];
+  return st ? st.status : '';
+}
+
+function statusBadgeHtml(statusKey) {
+  const info = STATUS_INFO[statusKey];
+  if (!info) return '';
+  return `<span class="part-status ${info.cls}">${info.label}</span>`;
+}
 
 function slugify(name) {
   if (!name) return '';
@@ -399,11 +512,12 @@ async function fetchCSV(url) {
 }
 
 async function loadData() {
-  const [machineRows, logRows, bomRows, statusRows] = await Promise.all([
+  const [machineRows, logRows, bomRows, statusRows, machineStatusRows] = await Promise.all([
     fetchCSV(MACHINES_URL),
     fetchCSV(LOGS_URL),
     fetchCSV(BOM_URL).catch(() => []),
-    fetchCSV(PART_STATUS_URL).catch(() => [])
+    fetchCSV(PART_STATUS_URL).catch(() => []),
+    fetchCSV(MACHINE_STATUS_URL).catch(() => [])
   ]);
 
   const seen = {};
@@ -474,6 +588,19 @@ async function loadData() {
         inService: (r[4] || '').trim(),
       };
     });
+
+  MACHINE_STATUS = {};
+  machineStatusRows
+    .filter(r => r[0] && String(r[0]).trim())
+    .forEach(r => {
+      const status = normalizeStatus(r[1]);
+      if (!status) return;
+      MACHINE_STATUS[String(r[0]).trim()] = {
+        status,
+        since: (r[2] || '').trim(),
+        note: (r[3] || '').trim(),
+      };
+    });
 }
 
 function computePartStatus(partId, machineName, intervalDays) {
@@ -522,9 +649,25 @@ function escapeHtml(s) {
 function renderDirectory(filterText) {
   const app = document.getElementById('app');
   const q = (filterText || '').toLowerCase();
-  const filtered = MACHINES.filter(m =>
+  const textMatched = MACHINES.filter(m =>
     !q || m.name.toLowerCase().includes(q) || m.equipmentId.toLowerCase().includes(q) || m.location.toLowerCase().includes(q)
   );
+  const counts = { all: textMatched.length, running: 0, standby: 0, repair: 0, none: 0 };
+  textMatched.forEach(m => {
+    const s = getMachineStatus(m.name);
+    counts[s || 'none']++;
+  });
+  const filtered = statusFilter === 'all'
+    ? textMatched
+    : textMatched.filter(m => (getMachineStatus(m.name) || 'none') === statusFilter);
+
+  const chips = [
+    ['all', 'ทั้งหมด'],
+    ['running', 'ใช้งานอยู่'],
+    ['standby', 'สำรอง'],
+    ['repair', 'หยุดซ่อม'],
+    ['none', 'ยังไม่ระบุ'],
+  ];
 
   app.innerHTML = `
     <h1>Maintenance &amp; Repair Log</h1>
@@ -533,8 +676,20 @@ function renderDirectory(filterText) {
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="ค้นหาเครื่องจักร / Equipment ID / Location..." value="${escapeHtml(filterText || '')}">
     </div>
+    <div class="filter-row">
+      ${chips.map(([key, label]) => `
+        <button type="button" class="chip${statusFilter === key ? ' active' : ''}" data-filter="${key}">${label} (${counts[key]})</button>
+      `).join('')}
+    </div>
     <div id="machineList"></div>
   `;
+
+  app.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      statusFilter = chip.dataset.filter;
+      renderDirectory(document.getElementById('searchInput').value);
+    });
+  });
 
   const listEl = document.getElementById('machineList');
   if (filtered.length === 0) {
@@ -542,7 +697,10 @@ function renderDirectory(filterText) {
   } else {
     listEl.innerHTML = filtered.map(m => `
       <div class="card" data-id="${escapeHtml(m.id)}">
-        <div class="card-title">${escapeHtml(m.name)}</div>
+        <div class="card-head">
+          <div class="card-title">${escapeHtml(m.name)}</div>
+          ${statusBadgeHtml(getMachineStatus(m.name))}
+        </div>
         <div class="card-sub">${escapeHtml(m.equipmentId || '-')} · ${escapeHtml(m.location || '-')}</div>
       </div>
     `).join('');
@@ -592,6 +750,11 @@ function renderMachine(id) {
       <div class="info-row"><span class="info-label">Manufacturer/Model</span><span class="info-value">${escapeHtml(machine.manufacturer || '-')}</span></div>
       <div class="info-row"><span class="info-label">Location/Department</span><span class="info-value">${escapeHtml(machine.location || '-')}</span></div>
       <div class="info-row"><span class="info-label">Warranty Expiration</span><span class="info-value">${escapeHtml(machine.warranty || '-')}</span></div>
+    </div>
+    <div class="machine-status-row">
+      ${getMachineStatus(machine.name) ? statusBadgeHtml(getMachineStatus(machine.name)) : '<span class="part-status status-unknown">ยังไม่ระบุสถานะ</span>'}
+      ${(MACHINE_STATUS[machine.name] && MACHINE_STATUS[machine.name].since) ? `<span class="since">ตั้งแต่ ${escapeHtml(MACHINE_STATUS[machine.name].since)}</span>` : ''}
+      <button class="btn" type="button" id="changeStatusBtn">เปลี่ยนสถานะ</button>
     </div>
     ${overdueParts.length > 0 ? `
       <div class="banner" style="background:#3a1c1c;color:#ff9d9d;">
@@ -643,6 +806,7 @@ function renderMachine(id) {
 
   document.getElementById('backLink').addEventListener('click', () => navigate(null));
   document.getElementById('addLogBtn').addEventListener('click', () => openModal(machine));
+  document.getElementById('changeStatusBtn').addEventListener('click', () => openMsModal(machine));
   document.querySelectorAll('.put-in-service-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const row = e.target.closest('.pending-row');
@@ -650,6 +814,76 @@ function renderMachine(id) {
     });
   });
 }
+
+let msTarget = null; // machine
+
+function openMsModal(machine) {
+  msTarget = machine;
+  document.getElementById('msForm').reset();
+  document.getElementById('msTarget').textContent = machine.name;
+  const cur = getMachineStatus(machine.name);
+  if (cur) document.getElementById('ms_status').value = STATUS_INFO[cur].key;
+  const today = new Date();
+  document.getElementById('ms_date').value = `${today.getDate()}/${today.getMonth()+1}/${today.getFullYear()}`;
+  document.getElementById('msOverlay').classList.add('open');
+}
+
+function closeMsModal() {
+  document.getElementById('msOverlay').classList.remove('open');
+  msTarget = null;
+}
+
+document.getElementById('msCancelBtn').addEventListener('click', closeMsModal);
+document.getElementById('msOverlay').addEventListener('click', (e) => {
+  if (e.target.id === 'msOverlay') closeMsModal();
+});
+
+document.getElementById('msForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!msTarget) return;
+  const machine = msTarget;
+  const newKey = document.getElementById('ms_status').value;
+  const newStatus = normalizeStatus(newKey);
+  const oldStatus = getMachineStatus(machine.name);
+  const oldLabel = oldStatus ? STATUS_INFO[oldStatus].label : 'ไม่ระบุ';
+  const newLabel = STATUS_INFO[newStatus].label;
+  const userText = document.getElementById('ms_desc').value.trim();
+
+  const payload = {
+    requestType: 'setMachineStatus',
+    machineName: machine.name,
+    status: newKey,
+    date: document.getElementById('ms_date').value,
+    typeOfService: 'Switching',
+    description: `เปลี่ยนสถานะ: ${oldLabel} → ${newLabel} — ${userText}`,
+    userNote: userText,
+    serviceProvider: document.getElementById('ms_provider').value,
+    performedBy: document.getElementById('ms_performed').value,
+    notes: '',
+    location: machine.location,
+  };
+
+  const submitBtn = document.getElementById('msSubmitBtn');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'กำลังบันทึก...';
+
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(payload)
+    });
+    closeMsModal();
+    showToast(`เปลี่ยนสถานะเป็น "${newLabel}" แล้ว`);
+    await loadData();
+    renderMachine(currentMachineId);
+  } catch (err) {
+    showToast('บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง', true);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'บันทึก';
+  }
+});
 
 let pisTarget = null; // { machine, partId, partName }
 
