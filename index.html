@@ -277,6 +277,36 @@
     font-size: 13px;
     margin-left: auto;
   }
+
+  /* ===== Plant mimic view ===== */
+  .plant-top { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0 12px; }
+  .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--text-dim); margin:4px 0 14px; }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:-1px; }
+  .area { background:#0b0d12; border:1px solid var(--border); border-radius:12px; padding:0 0 12px; margin-bottom:6px; overflow:hidden; }
+  .area-title { background:#2b2f38; color:#e8eaed; font-weight:700; font-size:13px; letter-spacing:.04em; text-align:center; padding:7px 10px; border-bottom:1px solid var(--border); }
+  .area-title small { display:block; font-weight:400; color:var(--text-dim); font-size:11px; letter-spacing:0; }
+  .tiles { display:flex; flex-wrap:wrap; gap:8px; padding:12px 12px 0; justify-content:flex-start; }
+  .tile { width:84px; text-align:center; cursor:pointer; border-radius:10px; padding:6px 2px 5px; border:1px solid transparent; position:relative; }
+  .tile:hover { background:var(--card-hover); border-color:var(--border); }
+  .tile svg { width:40px; height:40px; display:block; margin:0 auto 2px; }
+  .tile .tl { font-size:11px; font-weight:600; line-height:1.15; word-break:break-word; }
+  .tile .dot { position:absolute; top:5px; right:12px; width:9px; height:9px; border-radius:50%; border:1.5px solid #0b0d12; }
+  .tile.s-repair .dot { animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity:.25; } }
+  .flow-arrow { text-align:center; color:#e5c93b; font-size:18px; line-height:1; margin:2px 0; }
+  .s-running { color:#2ecc71; } .s-standby { color:#f0b429; } .s-repair { color:#ff5a5a; } .s-none { color:#6b7280; }
+  .tile.s-none .tl { color:var(--text-dim); }
+
+  .scada-wrap { background:#05070a; border:1px solid var(--border); border-radius:12px; padding:6px; overflow-x:auto; }
+  .scada-wrap svg.scada { width:100%; min-width:760px; height:auto; display:block; }
+  .scada .node { cursor:pointer; }
+  .scada .node:hover .nbg { fill:#171a21; }
+  .scada .node.ghost { cursor:default; opacity:.45; }
+  .scada text { font-family: -apple-system,"Noto Sans Thai",Roboto,sans-serif; }
+  .scada .nlabel { font-size:13px; font-weight:700; fill:currentColor; text-anchor:middle; }
+  .scada .zlabel { font-size:12px; font-weight:600; fill:#c9d1de; }
+  .scada .pipe { fill:none; stroke-width:4; stroke-linejoin:round; stroke-linecap:round; }
+  .scada .node.s-repair .nbg { animation: pulse 1.2s infinite; }
 </style>
 </head>
 <body>
@@ -440,6 +470,7 @@ let BOM = [];
 let PART_STATUS = {}; // key: machineName + '|' + partId -> {lastReplaced, lastInspected, inService}
 let MACHINE_STATUS = {}; // key: machineName -> {status, since, note}
 let statusFilter = 'all';
+let lineFilter = 'all'; // 'all' | 'L350' | 'L800' | 'other'
 let currentMachineId = null;
 
 // Machine statuses are stored in the sheet as 'Running' | 'Standby' | 'Under Repair'.
@@ -629,18 +660,27 @@ function computePartStatus(partId, machineName, intervalDays) {
   return Object.assign(base, { label: `ปกติ (${daysSince}/${intervalDays} วัน)`, cls: 'status-good', overdue: false, pending: false });
 }
 
+let route = null; // { m, view } — kept in memory so the app still works if the URL can't be changed
+function readRouteFromUrl() {
+  const q = new URLSearchParams(location.search);
+  return { m: q.get('m'), view: q.get('view') };
+}
 function getParam() {
-  return new URLSearchParams(location.search).get('m');
+  if (!route) route = readRouteFromUrl();
+  return route.m;
+}
+function pushRoute(r, url) {
+  route = r;
+  try { history.pushState({}, '', url); } catch (e) { /* sandboxed preview: keep in-memory route */ }
 }
 
 function navigate(id) {
-  const url = id ? `${location.pathname}?m=${encodeURIComponent(id)}` : location.pathname;
-  history.pushState({}, '', url);
+  pushRoute({ m: id || null, view: null }, id ? `${location.pathname}?m=${encodeURIComponent(id)}` : location.pathname);
   render();
   window.scrollTo(0, 0);
 }
 
-window.addEventListener('popstate', render);
+window.addEventListener('popstate', () => { route = readRouteFromUrl(); render(); });
 
 function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -652,14 +692,18 @@ function renderDirectory(filterText) {
   const textMatched = MACHINES.filter(m =>
     !q || m.name.toLowerCase().includes(q) || m.equipmentId.toLowerCase().includes(q) || m.location.toLowerCase().includes(q)
   );
-  const counts = { all: textMatched.length, running: 0, standby: 0, repair: 0, none: 0 };
-  textMatched.forEach(m => {
+  const lineOf = m => { const pl = parseMachineName(m.name).plant; return (pl === 'L350' || pl === 'L800') ? pl : 'other'; };
+  const lineCounts = { all: textMatched.length, L350: 0, L800: 0, other: 0 };
+  textMatched.forEach(m => { lineCounts[lineOf(m)]++; });
+  const lineMatched = lineFilter === 'all' ? textMatched : textMatched.filter(m => lineOf(m) === lineFilter);
+  const counts = { all: lineMatched.length, running: 0, standby: 0, repair: 0, none: 0 };
+  lineMatched.forEach(m => {
     const s = getMachineStatus(m.name);
     counts[s || 'none']++;
   });
   const filtered = statusFilter === 'all'
-    ? textMatched
-    : textMatched.filter(m => (getMachineStatus(m.name) || 'none') === statusFilter);
+    ? lineMatched
+    : lineMatched.filter(m => (getMachineStatus(m.name) || 'none') === statusFilter);
 
   const chips = [
     ['all', 'ทั้งหมด'],
@@ -677,6 +721,10 @@ function renderDirectory(filterText) {
       <input type="text" id="searchInput" placeholder="ค้นหาเครื่องจักร / Equipment ID / Location..." value="${escapeHtml(filterText || '')}">
     </div>
     <div class="filter-row">
+      ${[['all','ทุกไลน์'],['L350','L350'],['L800','L800'],['other','อื่นๆ']].map(([k, l]) => `
+        <button type="button" class="chip${lineFilter === k ? ' active' : ''}" data-line="${k}">${l} (${lineCounts[k]})</button>`).join('')}
+    </div>
+    <div class="filter-row">
       ${chips.map(([key, label]) => `
         <button type="button" class="chip${statusFilter === key ? ' active' : ''}" data-filter="${key}">${label} (${counts[key]})</button>
       `).join('')}
@@ -684,7 +732,13 @@ function renderDirectory(filterText) {
     <div id="machineList"></div>
   `;
 
-  app.querySelectorAll('.chip').forEach(chip => {
+  app.querySelectorAll('.chip[data-line]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      lineFilter = chip.dataset.line;
+      renderDirectory(document.getElementById('searchInput').value);
+    });
+  });
+  app.querySelectorAll('.chip[data-filter]').forEach(chip => {
     chip.addEventListener('click', () => {
       statusFilter = chip.dataset.filter;
       renderDirectory(document.getElementById('searchInput').value);
@@ -1071,9 +1125,232 @@ document.getElementById('logForm').addEventListener('submit', async (e) => {
   }
 });
 
+
+// ===== Plant mimic view =====
+let plantFilter = null;
+const AREA_INFO = {
+  pre:    { title: 'PRE-TREATMENT', sub: 'น้ำมันดิบ / ให้ความร้อน / ผสมกรด' },
+  bleach: { title: 'BLEACHING & FILTRATION', sub: 'ฟอกสี / กรอง' },
+  deo:    { title: 'DEODORIZATION', sub: 'ไล่กลิ่น' },
+  util:   { title: 'VACUUM / COOLING / UTILITIES', sub: 'สุญญากาศ / น้ำหล่อเย็น / ปั๊มและถังสนับสนุน' },
+  support:{ title: 'SUPPORT', sub: 'ระบบสนับสนุนอื่นๆ' },
+  crane:  { title: 'CRANE', sub: 'เครน' },
+};
+const AREA_ORDER = ['pre', 'bleach', 'deo', 'util', 'support', 'crane'];
+
+function parseMachineName(name) {
+  const mt = String(name).trim().match(/^(.*?)\s+(L\d{3})$/);
+  return mt ? { tag: mt[1], plant: mt[2] } : { tag: String(name).trim(), plant: 'อื่นๆ' };
+}
+
+function classifyArea(tag) {
+  const T = tag.toUpperCase();
+  if (/^CRANE/.test(T)) return 'crane';
+  if (/^NEW POLISHING/.test(T)) return 'bleach';
+  if (/^(UPS|CHILLER|MAIN STEAM|WATER NOZZLE|DUST|PH HOTWELL|WSP|M01)/.test(T)) return 'support';
+  const d = T.match(/(\d+)/);
+  if (!d) return 'support';
+  const n = parseInt(d[1], 10);
+  if (n >= 5000 || (n >= 500 && n < 600)) return 'util';
+  if (n >= 300 && n < 400) return 'pre';
+  if (n >= 600 && n < 700) return 'bleach';
+  if (n >= 700 && n < 760) return 'deo';
+  if (n >= 760 && n < 900) return 'util';
+  return 'support';
+}
+
+function iconType(tag) {
+  const T = tag.toUpperCase();
+  if (/^CRANE/.test(T)) return 'crane';
+  if (/^(VP|EP)/.test(T)) return 'vac';
+  if (/^PC/.test(T)) return 'vessel';
+  if (/^(PU|P\d|WSP)/.test(T)) return 'pump';
+  if (/^(MX|FM|M\d)/.test(T)) return 'mixer';
+  if (/^(HE|HB)/.test(T)) return 'hx';
+  if (/^(VE|VB|TK|878|PC)/.test(T)) return 'vessel';
+  if (/^FL|POLISHING/.test(T)) return 'filter';
+  if (/^CT/.test(T)) return 'tower';
+  if (/^(AIT|PH)/.test(T)) return 'sensor';
+  if (/^UPS/.test(T)) return 'ups';
+  if (/^CHILLER/.test(T)) return 'chiller';
+  return 'generic';
+}
+
+function iconSvg(type) {
+  const f = 'fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"';
+  const n = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"';
+  const shapes = {
+    pump:   `<circle cx="18" cy="23" r="12" ${f}/><path d="M18 11 L36 11 L36 17" ${n}/><path d="M12 23 L24 23 M18 17 L24 23 L18 29" ${n}/>`,
+    vac:    `<circle cx="20" cy="22" r="13" ${f}/><path d="M13 15 L20 29 L27 15" ${n}/>`,
+    mixer:  `<rect x="14" y="3" width="12" height="9" rx="2" ${f}/><path d="M20 12 V30 M12 32 L20 28 L28 32" ${n}/><path d="M7 14 H33 V36 H7 Z" ${n} stroke-opacity=".5"/>`,
+    hx:     `<rect x="4" y="11" width="32" height="18" rx="4" ${f}/><path d="M9 20 L14 14 L19 26 L24 14 L29 26 L33 20" ${n}/>`,
+    vessel: `<path d="M10 8 Q20 2 30 8 V32 Q20 38 10 32 Z" ${f}/><path d="M10 18 H30" ${n} stroke-opacity=".5"/>`,
+    filter: `<path d="M9 6 H31 V22 L22 34 H18 L9 22 Z" ${f}/><path d="M16 38 H24" ${n}/>`,
+    tower:  `<path d="M8 6 H32 L28 34 H12 Z" ${f}/><path d="M14 16 H26 M13 24 H27" ${n} stroke-opacity=".6"/>`,
+    sensor: `<circle cx="20" cy="20" r="11" ${f}/><path d="M20 20 L26 13" ${n}/>`,
+    ups:    `<rect x="7" y="8" width="26" height="24" rx="4" ${f}/><path d="M22 12 L15 21 H21 L18 29 L26 19 H20 Z" ${n}/>`,
+    chiller:`<rect x="3" y="10" width="34" height="20" rx="3" ${f}/><rect x="22" y="14" width="11" height="12" rx="1" ${n}/>`,
+    crane:  `<path d="M4 10 H36 M20 10 V26 M20 26 Q15 26 15 31 Q15 35 20 35" ${n}/><rect x="4" y="6" width="32" height="5" rx="1" ${f}/>`,
+    generic:`<rect x="8" y="8" width="24" height="24" rx="5" ${f}/>`,
+  };
+  return `<svg viewBox="0 0 40 40" aria-hidden="true">${shapes[type] || shapes.generic}</svg>`;
+}
+
+
+// ===== SCADA-style mimic (hand-laid-out screens) =====
+let plantMode = 'groups'; // 'groups' | 'scada'
+const PIPE_COLORS = { oil: '#e5c93b', chem: '#c04fd6', steam: '#e24b3b', water: '#35c6d8', vac: '#35c6d8' };
+const SCADA_SCREENS = {
+  pretreat: {
+    title: 'PRE-TREATMENT / BLEACHING SECTION',
+    w: 1200, h: 840,
+    // pipe y = node y - 4 so lines run through icon centres
+    pipes: [
+      ['oil',  [[20,696],[300,696],[300,296],[700,296],[700,476]]],
+      ['oil',  [[700,476],[1060,476],[1060,560],[880,560]]],
+      ['oil',  [[880,560],[1080,560]]],
+      ['oil',  [[880,560],[880,756]]], ['oil', [[980,560],[980,756]]], ['oil', [[1080,560],[1080,756]]],
+      ['chem', [[420,616],[420,716],[490,716],[490,650],[700,650],[700,476]]],
+      ['chem', [[560,616],[560,716],[490,716]]],
+      ['vac',  [[560,126],[780,126]]],
+      ['chem', [[780,126],[780,350],[820,350],[820,476]]],
+      ['steam',[[860,470],[860,200],[1000,200],[1000,160]]],
+      ['water',[[1000,100],[1000,160]]],
+    ],
+    deco: [
+      { t:'vessel', x:820, y:480, lab:'VE610' },
+      { t:'cyclone', x:1000, y:160, lab:'SE611' },
+    ],
+    zones: [
+      { x:20, y:655, txt:'CRUDE OIL ▶' },
+      { x:1000, y:90, txt:'TO HOT WELL' },
+      { x:420, y:790, txt:'กรดฟอสฟอริก' }, { x:560, y:790, txt:'กรดซิตริก' },
+      { x:1100, y:545, txt:'TO FILTER ▶' },
+    ],
+    nodes: [
+      ['PU301A',60,700],['PU301B',130,700],['PU301C',200,700],['PU301D',270,700],
+      ['HE311A',380,300],['HE311B',470,300],['HE312A',560,300],['HE312B',650,300],
+      ['MX312',700,480],['MX610',820,580],
+      ['VE611',940,480],['MX611',940,390],['VE612',1060,480],['MX612',1060,390],
+      ['EP631A',560,130],['EP631B',660,130],['TK632A',780,130],['VB632A',780,230],
+      ['VP611',1120,160],
+      ['TK321',420,620],['PU321',420,720],['TK321B',560,620],['PU321B',560,720],
+      ['PU621',880,640],['PU622',980,640],['PU623',1080,640],
+      ['FL621',880,760],['FL622',980,760],['FL623',1080,760],
+    ],
+  },
+};
+
+function renderScadaSvg(screenKey, plant, itemsByName) {
+  const sc = SCADA_SCREENS[screenKey];
+  const pipes = sc.pipes.map(([k, pts]) =>
+    `<polyline class="pipe" stroke="${PIPE_COLORS[k]}" points="${pts.map(q => q.join(',')).join(' ')}"/>`).join('');
+  const deco = sc.deco.filter(d => !d.skip).map(d => `
+    <rect x="${d.x-30}" y="${d.y-28}" width="60" height="62" rx="8" fill="#05070a"/>
+    <g transform="translate(${d.x-22},${d.y-26}) scale(1.1)" style="color:#7d8aa0">${iconSvg(d.t === 'cyclone' ? 'filter' : d.t).replace('<svg viewBox="0 0 40 40" aria-hidden="true">','').replace('</svg>','')}</g>
+    <text class="zlabel" x="${d.x}" y="${d.y+46}" text-anchor="middle">${d.lab}</text>`).join('');
+  const zones = sc.zones.map(z => `<text class="zlabel" x="${z.x}" y="${z.y}">${escapeHtml(z.txt)}</text>`).join('');
+  const nodes = sc.nodes.map(([tag, x, y]) => {
+    const full = `${tag} ${plant}`;
+    const it = itemsByName[full];
+    const st = it ? it.st : 'ghost';
+    const inner = iconSvg(iconType(tag)).replace('<svg viewBox="0 0 40 40" aria-hidden="true">','').replace('</svg>','');
+    const cls = it ? `node s-${it.st}` : 'node ghost s-none';
+    return `<g class="${cls}" ${it ? `data-id="${escapeHtml(it.m.id)}"` : ''} transform="translate(${x},${y})">
+      <title>${escapeHtml(full)}${it ? (it.st !== 'none' ? ' — ' + STATUS_INFO[it.st].label : ' — ยังไม่ระบุสถานะ') : ' — ไม่มีเครื่องนี้ในไลน์ ' + plant}</title>
+      <rect class="nbg" x="-30" y="-28" width="60" height="62" rx="8" fill="#05070a"/>
+      <g transform="translate(-22,-26) scale(1.1)"${it ? '' : ' stroke-dasharray="3 3"'}>${inner}</g>
+      <text class="nlabel" x="0" y="46">${escapeHtml(tag)}</text>
+      ${it ? `<circle cx="22" cy="-22" r="5" fill="currentColor" stroke="#05070a" stroke-width="2"/>` : ''}
+    </g>`;
+  }).join('');
+  return `<svg class="scada" viewBox="0 0 ${sc.w} ${sc.h}" xmlns="http://www.w3.org/2000/svg">
+    <rect width="${sc.w}" height="${sc.h}" fill="#05070a"/>
+    <rect x="330" y="12" width="540" height="34" rx="3" fill="#2b2f38"/>
+    <text x="600" y="35" text-anchor="middle" style="font-size:17px;font-weight:700;fill:#e8eaed">${sc.title}</text>
+    ${pipes}${deco}${zones}${nodes}</svg>`;
+}
+
+function renderPlant() {
+  const app = document.getElementById('app');
+  const items = MACHINES.map(m => {
+    const pn = parseMachineName(m.name);
+    return Object.assign({ m }, pn, { area: classifyArea(pn.tag), st: getMachineStatus(m.name) || 'none' });
+  });
+  const plantCounts = {};
+  items.forEach(i => { plantCounts[i.plant] = (plantCounts[i.plant] || 0) + 1; });
+  const plants = Object.keys(plantCounts).sort((a, b) => (a === 'อื่นๆ') - (b === 'อื่นๆ') || a.localeCompare(b));
+  if (!plantFilter || !plantCounts[plantFilter]) {
+    plantFilter = plantCounts['L350'] ? 'L350' : plants[0];
+  }
+  const cur = items.filter(i => i.plant === plantFilter);
+  const cnt = { running: 0, standby: 0, repair: 0, none: 0 };
+  cur.forEach(i => cnt[i.st]++);
+
+  const natural = (a, b) => a.tag.localeCompare(b.tag, 'en', { numeric: true });
+  const sections = AREA_ORDER.map((key, idx) => {
+    const list = cur.filter(i => i.area === key).sort(natural);
+    if (!list.length) return '';
+    const flowArrow = (key === 'pre' || key === 'bleach') ? '<div class="flow-arrow">▼</div>' : '';
+    return `
+      <div class="area">
+        <div class="area-title">${AREA_INFO[key].title}<small>${AREA_INFO[key].sub} · ${list.length} รายการ</small></div>
+        <div class="tiles">
+          ${list.map(i => `
+            <div class="tile s-${i.st}" data-id="${escapeHtml(i.m.id)}" title="${escapeHtml(i.m.name)}${i.st !== 'none' ? ' — ' + STATUS_INFO[i.st].label : ' — ยังไม่ระบุสถานะ'}">
+              <span class="dot" style="background:currentColor"></span>
+              ${iconSvg(iconType(i.tag))}
+              <div class="tl">${escapeHtml(i.tag)}</div>
+            </div>`).join('')}
+        </div>
+      </div>${flowArrow}`;
+  }).join('');
+
+  app.innerHTML = `
+    <a class="back-link" id="backLink">← รายการเครื่องจักร</a>
+    <h1>ผังโรงงาน</h1>
+    <div class="subtitle">แสดงเครื่องจักรทุกตัวตามส่วนของกระบวนการ · กดที่อุปกรณ์เพื่อเปิด Log</div>
+    <div class="plant-top">
+      ${plants.map(pl => `<button type="button" class="chip${plantFilter === pl ? ' active' : ''}" data-plant="${escapeHtml(pl)}">${escapeHtml(pl)} (${plantCounts[pl]})</button>`).join('')}
+    </div>
+    <div class="legend">
+      <span><i style="background:#2ecc71"></i>ใช้งานอยู่ ${cnt.running}</span>
+      <span><i style="background:#f0b429"></i>สำรอง ${cnt.standby}</span>
+      <span><i style="background:#ff5a5a"></i>หยุดซ่อม ${cnt.repair}</span>
+      <span><i style="background:#6b7280"></i>ยังไม่ระบุ ${cnt.none}</span>
+    </div>
+    <div class="plant-top">
+      <button type="button" class="chip${plantMode === 'groups' ? ' active' : ''}" data-mode="groups">▦ แยกตามกลุ่ม (ครบทุกตัว)</button>
+      <button type="button" class="chip${plantMode === 'scada' ? ' active' : ''}" data-mode="scada">📐 ผัง SCADA: Pre-Treatment / Bleaching</button>
+    </div>
+    ${plantMode === 'scada'
+      ? `<div class="scada-wrap">${renderScadaSvg('pretreat', plantFilter, Object.fromEntries(cur.map(i => [i.m.name, i])))}</div>
+         <div class="subtitle" style="margin-top:8px">เส้นประจาง = อุปกรณ์ที่ไม่มีในไลน์นี้ · ถ้าเครื่องไหนไม่อยู่ในผังนี้ ดูในโหมด "แยกตามกลุ่ม"</div>`
+      : sections}
+  `;
+  app.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => { plantMode = b.dataset.mode; renderPlant(); }));
+  app.querySelectorAll('.scada .node[data-id]').forEach(n => n.addEventListener('click', () => navigate(n.dataset.id)));
+
+  document.getElementById('backLink').addEventListener('click', () => navigate(null));
+  app.querySelectorAll('[data-plant]').forEach(b => b.addEventListener('click', () => {
+    plantFilter = b.dataset.plant; renderPlant();
+  }));
+  app.querySelectorAll('.tile').forEach(t => t.addEventListener('click', () => navigate(t.dataset.id)));
+}
+
+function openPlantView() {
+  pushRoute({ m: null, view: 'plant' }, `${location.pathname}?view=plant`);
+  render();
+  window.scrollTo(0, 0);
+}
+
 function render() {
   const id = getParam();
+  const view = route ? route.view : null;
+  const wrap = document.querySelector('.wrap');
+  if (wrap) wrap.style.maxWidth = (!id && view === 'plant') ? '1100px' : '';
   if (id) renderMachine(id);
+  else if (view === 'plant') renderPlant();
   else renderDirectory();
 }
 
